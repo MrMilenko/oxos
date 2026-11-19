@@ -6,6 +6,7 @@
 #include <extensions/extensions.h>
 #include <kernel_modules/kernel_modules.h>
 #include <ini_file/launch_redirect_ini.h>
+#include <ini_file/settings_ini.h>
 #include <ini_file/title_patcher_ini.h>
 #include <core/core.h>
 #include <runtime/runtime.h>
@@ -907,10 +908,13 @@ static void NTAPI TitleThread(PVOID, PVOID) {
         LaunchAtColdBoot();
     }
     extensions::TitleLoaded();
+    // The console settings (spec/oxos_internal/44): the fan and the in-game reset's buttons now, the front LED as the title starts. Safe mode keeps the
+    // defaults.
+    const UCHAR titleLed = !extensions::SafeMode && kernel_modules::Modules ? kernel_modules::Modules->ApplyConsoleSettings() : CONSOLE_LED_SOLID_GREEN;
     kernel_modules::UnloadKernelModules();
     filesystems::HDDFSRememberTitleFolder();
     PrepareToEnterTitle();
-    hardware::chipset::SetBootLed(0x0F); // solid green: the title (dashboard or game) is starting
+    hardware::chipset::SetBootLed(titleLed); // the title (dashboard or game) is starting: solid green unless [console] front_led says otherwise
     diagnostics::BootMarksDone();
     CallTitleEntry(); // exactly `call [0x00010128]`, which trainer loaders hook (spec/oxos_internal/23)
     PsTerminateSystemThread(STATUS_SUCCESS);

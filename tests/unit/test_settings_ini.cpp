@@ -118,3 +118,111 @@ TEST(SettingsIni, DashboardPathsOnUnknownDrivesAreNone) {
     EXPECT_EQ(Dashboard(text, 2), "(none)");
     EXPECT_EQ(Dashboard(text, 3), "\\Device\\Harddisk0\\Partition2\\last.xbe");
 }
+
+// --- [console] and [in_game_reset] (spec/oxos_internal/44)
+
+namespace {
+
+struct ConsoleResult {
+    CONSOLE_SETTINGS Settings;
+    uint32_t Errors;
+};
+
+ConsoleResult ReadConsole(const std::string &text) {
+    ConsoleResult result;
+    memset(&result.Settings, 0x55, sizeof(result.Settings));
+    result.Errors = 99;
+    oxos::ini_file::ReadConsoleSettings(text.data(), (uint32_t)text.size(), &result.Settings, &result.Errors);
+    return result;
+}
+
+} // namespace
+
+TEST(SettingsIni, ConsoleDefaultsAreTodaysBehaviour) {
+    for (const char *text : {"", "[console]\n[in_game_reset]\n", "[dashboard]\ndashboard_1 = C:\\xboxdash.xbe\n"}) {
+        ConsoleResult r = ReadConsole(text);
+        EXPECT_EQ(r.Settings.FrontLed, 0x0F);
+        EXPECT_EQ(r.Settings.FanSpeed, CONSOLE_FAN_UNCHANGED);
+        EXPECT_EQ(r.Settings.ResetButtons, 0xD020);
+        EXPECT_EQ(r.Settings.PowerOffButtons, 0);
+        EXPECT_EQ(r.Errors, 0u);
+    }
+}
+
+TEST(SettingsIni, ConsoleAsTheSpecShowsIt) {
+    ConsoleResult r = ReadConsole("[console]\r\nfront_led = GGGG\r\nfan_speed = auto\r\n[in_game_reset]\r\nreset_buttons = LT RT BACK BLACK\r\n"
+                                  "power_off_buttons = none\r\n");
+    EXPECT_EQ(r.Settings.FrontLed, 0x0F);
+    EXPECT_EQ(r.Settings.FanSpeed, CONSOLE_FAN_AUTOMATIC);
+    EXPECT_EQ(r.Settings.ResetButtons, 0xD020);
+    EXPECT_EQ(r.Settings.PowerOffButtons, 0);
+    EXPECT_EQ(r.Errors, 0u);
+}
+
+TEST(SettingsIni, FrontLedPatterns) {
+    EXPECT_EQ(ReadConsole("[console]\nfront_led = RRRR\n").Settings.FrontLed, 0xF0);
+    EXPECT_EQ(ReadConsole("[console]\nfront_led = aaaa\n").Settings.FrontLed, 0xFF);
+    EXPECT_EQ(ReadConsole("[console]\nfront_led = GRGR\n").Settings.FrontLed, 0xA5);
+    EXPECT_EQ(ReadConsole("[console]\nfront_led = G---\n").Settings.FrontLed, 0x01);
+    EXPECT_EQ(ReadConsole("[console]\nfront_led = ----\n").Settings.FrontLed, 0x00);
+    for (const char *bad : {"GGG", "GGGGG", "GGXG", "", "G G "}) {
+        ConsoleResult r = ReadConsole(std::string("[console]\nfront_led = ") + bad + "\n");
+        EXPECT_EQ(r.Settings.FrontLed, 0x0F) << bad;
+        EXPECT_EQ(r.Errors, 1u) << bad;
+    }
+}
+
+TEST(SettingsIni, FanSpeeds) {
+    EXPECT_EQ(ReadConsole("[console]\nfan_speed = 20\n").Settings.FanSpeed, 20);
+    EXPECT_EQ(ReadConsole("[console]\nfan_speed = 100\n").Settings.FanSpeed, 100);
+    EXPECT_EQ(ReadConsole("[console]\nFAN_SPEED = AUTO\n").Settings.FanSpeed, CONSOLE_FAN_AUTOMATIC);
+    for (const char *bad : {"19", "0", "101", "1000", "-5", "fast", "50%", ""}) {
+        ConsoleResult r = ReadConsole(std::string("[console]\nfan_speed = ") + bad + "\n");
+        EXPECT_EQ(r.Settings.FanSpeed, CONSOLE_FAN_UNCHANGED) << bad;
+        EXPECT_EQ(r.Errors, 1u) << bad;
+    }
+}
+
+TEST(SettingsIni, ResetButtonNames) {
+    EXPECT_EQ(ReadConsole("[in_game_reset]\nreset_buttons = lt+rt+start+back\n").Settings.ResetButtons, 0xC030);
+    EXPECT_EQ(ReadConsole("[in_game_reset]\nreset_buttons = UP DOWN LEFT RIGHT\n").Settings.ResetButtons, 0x000F);
+    EXPECT_EQ(ReadConsole("[in_game_reset]\nreset_buttons = LS RS A B X Y WHITE\n").Settings.ResetButtons, 0x2FC0);
+    EXPECT_EQ(ReadConsole("[in_game_reset]\nreset_buttons = none\n").Settings.ResetButtons, 0);
+}
+
+TEST(SettingsIni, ResetButtonsNeedThreeKnownButtons) {
+    for (const char *bad : {"LT RT", "LT LT RT", "A", "LT RT BACK SELECT", "", "LT RT BACK BLACK ; reset"}) {
+        ConsoleResult r = ReadConsole(std::string("[in_game_reset]\nreset_buttons = ") + bad + "\n");
+        EXPECT_EQ(r.Settings.ResetButtons, 0xD020) << bad;
+        EXPECT_EQ(r.Errors, 1u) << bad;
+    }
+}
+
+TEST(SettingsIni, PowerOffMustNotOverlapTheReset) {
+    ConsoleResult r = ReadConsole("[in_game_reset]\npower_off_buttons = LT RT START\n");
+    EXPECT_EQ(r.Settings.PowerOffButtons, 0xC010);
+    EXPECT_EQ(r.Errors, 0u);
+    r = ReadConsole("[in_game_reset]\npower_off_buttons = LT RT BACK\n"); // inside LT RT BACK BLACK
+    EXPECT_EQ(r.Settings.PowerOffButtons, 0);
+    EXPECT_EQ(r.Errors, 1u);
+    r = ReadConsole("[in_game_reset]\npower_off_buttons = LT RT BACK BLACK WHITE\n"); // holds all of the reset's
+    EXPECT_EQ(r.Settings.PowerOffButtons, 0);
+    EXPECT_EQ(r.Errors, 1u);
+    r = ReadConsole("[in_game_reset]\nreset_buttons = none\npower_off_buttons = LT RT BACK\n"); // no reset: nothing to overlap
+    EXPECT_EQ(r.Settings.PowerOffButtons, 0xC020);
+    EXPECT_EQ(r.Errors, 0u);
+}
+
+TEST(SettingsIni, ConsoleKeysOnlyInTheirSections) {
+    ConsoleResult r = ReadConsole("front_led = RRRR\n[in_game_reset]\nfan_speed = 50\n[console]\nreset_buttons = none\n[boot_video]\nfront_led = AAAA\n");
+    EXPECT_EQ(r.Settings.FrontLed, 0x0F);
+    EXPECT_EQ(r.Settings.FanSpeed, CONSOLE_FAN_UNCHANGED);
+    EXPECT_EQ(r.Settings.ResetButtons, 0xD020);
+    EXPECT_EQ(r.Errors, 0u);
+}
+
+TEST(SettingsIni, ConsoleTheLastOfTwoKeysCounts) {
+    ConsoleResult r = ReadConsole("[console]\nfan_speed = 50\nfan_speed = auto\n[Console]\nfront_led = RRRR\n");
+    EXPECT_EQ(r.Settings.FanSpeed, CONSOLE_FAN_AUTOMATIC);
+    EXPECT_EQ(r.Settings.FrontLed, 0xF0);
+}

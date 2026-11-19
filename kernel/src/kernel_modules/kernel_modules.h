@@ -32,6 +32,9 @@ struct XK_KERNEL_MODULES {
     void (*LoadExtensions)();
     // kernel_settings.cpp: oxos_settings.ini's [boot_video] switches, XK_BOOT_VIDEO_*; 0 without the file.
     ULONG (*ReadBootVideoSwitches)();
+    // kernel_settings.cpp: oxos_settings.ini's [console] and [in_game_reset] (spec/oxos_internal/44): sets the fan and the in-game reset's buttons, and
+    // returns the front LED pattern for the title.
+    UCHAR (*ApplyConsoleSettings)();
     // launch_redirect.cpp: the target oxos_launch_redirect.ini gives Path (a device path), as a device path in Target (TargetSize bytes); false: none
     // (spec/oxos_internal/33).
     bool (*FindLaunchRedirect)(PCSZ Path, char *Target, ULONG TargetSize);

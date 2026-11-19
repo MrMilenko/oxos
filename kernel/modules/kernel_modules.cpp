@@ -9,6 +9,7 @@ namespace {
 const XK_KERNEL_MODULES Table = {
     xk::extensions::LoadListedExtensions,
     xk::modules::ReadBootVideoSwitches,
+    xk::modules::ApplyConsoleSettings,
     xk::modules::FindLaunchRedirect,
     xk::modules::LoadListedDashboard,
     xk::modules::BuildTitlePatches,
